@@ -54,8 +54,26 @@ local keys = {
    { key = 'Backspace',  mods = mod.SUPER,     action = act.SendString '\u{15}' },
 
    -- copy/paste --
-   { key = 'c',          mods = 'CTRL|SHIFT',  action = act.CopyTo('Clipboard') },
-   { key = 'v',          mods = 'CTRL|SHIFT',  action = act.PasteFrom('Clipboard') },
+   -- { key = 'c',          mods = 'CTRL|SHIFT',  action = act.CopyTo('Clipboard') },
+   -- { key = 'v',          mods = 'CTRL|SHIFT',  action = act.PasteFrom('Clipboard') },
+   
+   -- Ctrl+C 的逻辑：
+   -- 1. 如果有选中文字，则复制到剪贴板
+   -- 2. 如果没有选中文字，则发送 Ctrl+C 信号（用于中断程序）
+   {
+      key = 'c',
+      mods = 'CTRL',
+      action = wezterm.action_callback(function(window, pane)
+         local has_selection = window:get_selection_text_for_pane(pane) ~= ''
+         if has_selection then
+            window:perform_action(act.CopyTo('Clipboard'), pane)
+         else
+            window:perform_action(act.SendKey({ key = 'c', mods = 'CTRL' }), pane)
+         end
+      end),
+   },
+   -- Ctrl+V 粘贴
+   { key = 'v',          mods = 'CTRL',        action = act.PasteFrom('Clipboard') },
 
    -- tabs --
    -- tabs: spawn+close
@@ -244,6 +262,19 @@ local mouse_bindings = {
       event = { Up = { streak = 1, button = 'Left' } },
       mods = 'CTRL',
       action = act.OpenLinkAtMouseCursor,
+   },
+   
+   -- 右键单击：如果有选中的文字 -> 复制并取消选中
+   {
+      event = { Down = { streak = 1, button = 'Right' } },
+      mods = 'NONE',
+      action = wezterm.action_callback(function(window, pane)
+         local has_selection = window:get_selection_text_for_pane(pane) ~= ''
+         if has_selection then
+            window:perform_action(act.CopyTo('ClipboardAndPrimarySelection'), pane)
+            window:perform_action(act.ClearSelection, pane)
+         end
+      end),
    },
 }
 
