@@ -4,6 +4,9 @@ return {
    exit_behavior = 'CloseOnCleanExit', -- if the shell program exited with a successful status
    exit_behavior_messaging = 'Verbose',
    status_update_interval = 1000,
+   set_environment_variables = {
+      WEZTERM_SHELL_INTEGRATION = '1',
+   },
    audible_bell = 'Disabled',
 
    scrollback_lines = 20000,
