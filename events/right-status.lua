@@ -23,8 +23,10 @@ local attr = Cells.attr
 
 local M = {}
 
-local ICON_SEPARATOR = nf.oct_dash
+local ICON_SEPARATOR = nf.pl_right_hard_divider  -- Powerline right arrow 
 local ICON_DATE = nf.fa_calendar
+local ICON_FOLDER = nf.md_folder
+local ICON_HOSTNAME = nf.md_monitor_shimmer
 
 ---@type string[]
 local discharging_icons = {
@@ -55,20 +57,44 @@ local charging_icons = {
 
 ---@type table<string, Cells.SegmentColors>
 -- stylua: ignore
+-- Using distinct background colors for Powerline effect
 local colors = {
-   date      = { fg = '#fab387', bg = 'rgba(0, 0, 0, 0.4)' },
-   battery   = { fg = '#f9e2af', bg = 'rgba(0, 0, 0, 0.4)' },
-   separator = { fg = '#74c7ec', bg = 'rgba(0, 0, 0, 0.4)' }
+   cwd       = { fg = '#1e1e2e', bg = '#89b4fa' },  -- Dark text on blue bg
+   hostname  = { fg = '#1e1e2e', bg = '#a6e3a1' },  -- Dark text on green bg
+   date      = { fg = '#1e1e2e', bg = '#fab387' },  -- Dark text on peach bg
+   battery   = { fg = '#1e1e2e', bg = '#f9e2af' },  -- Dark text on yellow bg
 }
+
+-- Background color for the tab bar (transparent/dark)
+local bg_color = 'rgba(0, 0, 0, 0)'
 
 local cells = Cells:new()
 
+-- Powerline style: arrow fg color = previous segment's bg color
 cells
-   :add_segment('date_icon', ICON_DATE .. '  ', colors.date, attr(attr.intensity('Bold')))
+   -- CWD segment with leading arrow
+   :add_segment('sep_cwd', ICON_SEPARATOR, { fg = colors.cwd.bg, bg = bg_color })
+   :add_segment('cwd_icon', ' ' .. ICON_FOLDER, colors.cwd, attr(attr.intensity('Bold')))
+   :add_segment('cwd_text', '', colors.cwd, attr(attr.intensity('Bold')))
+   :add_segment('cwd_padding', ' ', colors.cwd)
+   
+   -- Hostname segment with arrow transition
+   :add_segment('sep_hostname', ICON_SEPARATOR, { fg = colors.hostname.bg, bg = colors.cwd.bg })
+   :add_segment('hostname_icon', ' ' .. ICON_HOSTNAME, colors.hostname, attr(attr.intensity('Bold')))
+   :add_segment('hostname_text', '', colors.hostname, attr(attr.intensity('Bold')))
+   :add_segment('hostname_padding', ' ', colors.hostname)
+   
+   -- Date segment with arrow transition
+   :add_segment('sep_date', ICON_SEPARATOR, { fg = colors.date.bg, bg = colors.hostname.bg })
+   :add_segment('date_icon', ' ' .. ICON_DATE, colors.date, attr(attr.intensity('Bold')))
    :add_segment('date_text', '', colors.date, attr(attr.intensity('Bold')))
-   :add_segment('separator', ' ' .. ICON_SEPARATOR .. '  ', colors.separator)
-   :add_segment('battery_icon', '', colors.battery)
+   :add_segment('date_padding', ' ', colors.date)
+   
+   -- Battery segment with arrow transition
+   :add_segment('sep_battery', ICON_SEPARATOR, { fg = colors.battery.bg, bg = colors.date.bg })
+   :add_segment('battery_icon', ' ', colors.battery)
    :add_segment('battery_text', '', colors.battery, attr(attr.intensity('Bold')))
+   :add_segment('battery_padding', ' ', colors.battery)
 
 ---@return string, string
 local function battery_info()
@@ -91,6 +117,49 @@ local function battery_info()
    return charge, icon .. ' '
 end
 
+---Get current working directory and hostname
+---@param pane any
+---@return string, string
+local function get_cwd_hostname(pane)
+   local cwd = ''
+   local hostname = wezterm.hostname()
+   local cwd_uri = pane:get_current_working_dir()
+
+   if cwd_uri then
+      if type(cwd_uri) == 'userdata' then
+         cwd = cwd_uri.file_path or ''
+         hostname = cwd_uri.host or hostname
+      else
+         local uri = tostring(cwd_uri)
+         uri = uri:gsub('^file://', '')
+         local slash = uri:find('/')
+         if slash then
+            hostname = uri:sub(1, slash - 1)
+            cwd = uri:sub(slash)
+            cwd = cwd:gsub('%%(%x%x)', function(hex)
+               return string.char(tonumber(hex, 16))
+            end)
+         else
+            cwd = uri
+         end
+      end
+   end
+
+   if cwd ~= '' then
+      -- Shorten home directory to ~
+      local home = wezterm.home_dir
+      if cwd:find(home, 1, true) == 1 then
+         cwd = '~' .. cwd:sub(#home + 1)
+      end
+
+      -- Get just the last directory name for compact display
+      local basename = cwd:match('([^/\\]+)[/\\]*$') or cwd
+      return basename, hostname
+   end
+
+   return '~', hostname
+end
+
 ---@param opts? Event.RightStatusOptions Default: {date_format = '%a %H:%M:%S'}
 M.setup = function(opts)
    local valid_opts, err = EVENT_OPTS.validator:validate(opts or {})
@@ -99,17 +168,37 @@ M.setup = function(opts)
       wezterm.log_error(err)
    end
 
-   wezterm.on('update-right-status', function(window, _pane)
+   wezterm.on('update-right-status', function(window, pane)
       local battery_text, battery_icon = battery_info()
+      local cwd, hostname = get_cwd_hostname(pane)
 
       cells
-         :update_segment_text('date_text', wezterm.strftime(valid_opts.date_format))
+         :update_segment_text('cwd_text', ' ' .. cwd)
+         :update_segment_text('hostname_text', ' ' .. hostname)
+         :update_segment_text('date_text', ' ' .. wezterm.strftime(valid_opts.date_format))
          :update_segment_text('battery_icon', battery_icon)
          :update_segment_text('battery_text', battery_text)
 
       window:set_right_status(
          wezterm.format(
-            cells:render({ 'date_icon', 'date_text', 'separator', 'battery_icon', 'battery_text' })
+            cells:render({
+               'sep_cwd',
+               'cwd_icon',
+               'cwd_text',
+               'cwd_padding',
+               'sep_hostname',
+               'hostname_icon',
+               'hostname_text',
+               'hostname_padding',
+               'sep_date',
+               'date_icon',
+               'date_text',
+               'date_padding',
+               'sep_battery',
+               'battery_icon',
+               'battery_text',
+               'battery_padding',
+            })
          )
       )
    end)
