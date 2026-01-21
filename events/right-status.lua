@@ -27,6 +27,7 @@ local ICON_SEPARATOR = nf.pl_right_hard_divider  -- Powerline right arrow
 local ICON_DATE = nf.fa_calendar
 local ICON_FOLDER = nf.md_folder
 local ICON_HOSTNAME = nf.md_monitor_shimmer
+local ICON_GIT = nf.dev_git_branch
 
 ---@type string[]
 local discharging_icons = {
@@ -61,6 +62,7 @@ local charging_icons = {
 local colors = {
    cwd       = { fg = '#1e1e2e', bg = '#89b4fa' },  -- Dark text on blue bg
    hostname  = { fg = '#1e1e2e', bg = '#a6e3a1' },  -- Dark text on green bg
+   git       = { fg = '#1e1e2e', bg = '#94e2d5' },  -- Dark text on teal bg
    date      = { fg = '#1e1e2e', bg = '#fab387' },  -- Dark text on peach bg
    battery   = { fg = '#1e1e2e', bg = '#f9e2af' },  -- Dark text on yellow bg
 }
@@ -83,9 +85,15 @@ cells
    :add_segment('hostname_icon', ' ' .. ICON_HOSTNAME, colors.hostname, attr(attr.intensity('Bold')))
    :add_segment('hostname_text', '', colors.hostname, attr(attr.intensity('Bold')))
    :add_segment('hostname_padding', ' ', colors.hostname)
-   
+
+   -- Git segment with arrow transition
+   :add_segment('sep_git', ICON_SEPARATOR, { fg = colors.git.bg, bg = colors.hostname.bg })
+   :add_segment('git_icon', ' ' .. ICON_GIT, colors.git, attr(attr.intensity('Bold')))
+   :add_segment('git_text', '', colors.git, attr(attr.intensity('Bold')))
+   :add_segment('git_padding', ' ', colors.git)
+
    -- Date segment with arrow transition
-   :add_segment('sep_date', ICON_SEPARATOR, { fg = colors.date.bg, bg = colors.hostname.bg })
+   :add_segment('sep_date', ICON_SEPARATOR, { fg = colors.date.bg, bg = colors.git.bg })
    :add_segment('date_icon', ' ' .. ICON_DATE, colors.date, attr(attr.intensity('Bold')))
    :add_segment('date_text', '', colors.date, attr(attr.intensity('Bold')))
    :add_segment('date_padding', ' ', colors.date)
@@ -119,7 +127,22 @@ end
 
 ---Get current working directory and hostname
 ---@param pane any
----@return string, string
+---@param path string
+---@return string
+local function normalize_cwd_path(path)
+   if not path or path == '' then
+      return path
+   end
+
+   local normalized = path:gsub('^/([A-Za-z]:)', '%1')
+   if wezterm.target_triple and wezterm.target_triple:find('windows') then
+      normalized = normalized:gsub('/', '\\')
+   end
+
+   return normalized
+end
+
+---@return string, string, string|nil
 local function get_cwd_hostname(pane)
    local cwd = ''
    local hostname = wezterm.hostname()
@@ -146,6 +169,7 @@ local function get_cwd_hostname(pane)
    end
 
    if cwd ~= '' then
+      local cwd_path = normalize_cwd_path(cwd)
       -- Shorten home directory to ~
       local home = wezterm.home_dir
       if cwd:find(home, 1, true) == 1 then
@@ -154,10 +178,38 @@ local function get_cwd_hostname(pane)
 
       -- Get just the last directory name for compact display
       local basename = cwd:match('([^/\\]+)[/\\]*$') or cwd
-      return basename, hostname
+      return basename, hostname, cwd_path
    end
 
-   return '~', hostname
+   return '~', hostname, nil
+end
+
+---@param cwd_path string|nil
+---@return string|nil
+local function get_git_branch(cwd_path)
+   if not cwd_path or cwd_path == '' then
+      return nil
+   end
+
+   local ok, stdout = wezterm.run_child_process({
+      'git',
+      '-C',
+      cwd_path,
+      'rev-parse',
+      '--abbrev-ref',
+      'HEAD',
+   })
+
+   if not ok then
+      return nil
+   end
+
+   local branch = (stdout or ''):gsub('%s+$', '')
+   if branch == '' then
+      return nil
+   end
+
+   return branch
 end
 
 ---@param opts? Event.RightStatusOptions Default: {date_format = '%a %H:%M:%S'}
@@ -170,37 +222,45 @@ M.setup = function(opts)
 
    wezterm.on('update-right-status', function(window, pane)
       local battery_text, battery_icon = battery_info()
-      local cwd, hostname = get_cwd_hostname(pane)
+      local cwd, hostname, cwd_path = get_cwd_hostname(pane)
+      local git_branch = get_git_branch(cwd_path)
 
       cells
          :update_segment_text('cwd_text', ' ' .. cwd)
          :update_segment_text('hostname_text', ' ' .. hostname)
+         :update_segment_text('git_text', git_branch and (' ' .. git_branch) or '')
          :update_segment_text('date_text', ' ' .. wezterm.strftime(valid_opts.date_format))
          :update_segment_text('battery_icon', battery_icon)
          :update_segment_text('battery_text', battery_text)
 
-      window:set_right_status(
-         wezterm.format(
-            cells:render({
-               'sep_cwd',
-               'cwd_icon',
-               'cwd_text',
-               'cwd_padding',
-               'sep_hostname',
-               'hostname_icon',
-               'hostname_text',
-               'hostname_padding',
-               'sep_date',
-               'date_icon',
-               'date_text',
-               'date_padding',
-               'sep_battery',
-               'battery_icon',
-               'battery_text',
-               'battery_padding',
-            })
-         )
-      )
+      local segments = {
+         'sep_cwd',
+         'cwd_icon',
+         'cwd_text',
+         'cwd_padding',
+         'sep_hostname',
+         'hostname_icon',
+         'hostname_text',
+         'hostname_padding',
+      }
+
+      if git_branch then
+         table.insert(segments, 'sep_git')
+         table.insert(segments, 'git_icon')
+         table.insert(segments, 'git_text')
+         table.insert(segments, 'git_padding')
+      end
+
+      table.insert(segments, 'sep_date')
+      table.insert(segments, 'date_icon')
+      table.insert(segments, 'date_text')
+      table.insert(segments, 'date_padding')
+      table.insert(segments, 'sep_battery')
+      table.insert(segments, 'battery_icon')
+      table.insert(segments, 'battery_text')
+      table.insert(segments, 'battery_padding')
+
+      window:set_right_status(wezterm.format(cells:render(segments)))
    end)
 end
 
